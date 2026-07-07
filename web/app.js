@@ -41,6 +41,13 @@ async function api(path, opts) {
   if (!res.ok) {
     let detail = res.statusText;
     try { detail = (await res.json()).detail || detail; } catch (_) {}
+    // FastAPI validation errors return `detail` as an array of {msg, loc, ...} objects;
+    // stringify them into a readable message instead of the useless "[object Object]".
+    if (Array.isArray(detail)) {
+      detail = detail.map((e) => (e && e.msg) || JSON.stringify(e)).join("; ");
+    } else if (detail && typeof detail === "object") {
+      detail = detail.msg || JSON.stringify(detail);
+    }
     throw new Error(detail);
   }
   return res.status === 204 ? null : res.json();
@@ -323,11 +330,16 @@ async function refreshUploads() {
 }
 
 async function uploadFiles(fileList) {
-  if (!fileList.length) return;
+  // Snapshot the files NOW, before any await. `input.files` is a *live* FileList: the
+  // change handler clears the input (`input.value = ""`) right after calling us, and if we
+  // waited until after `await ensureSession()` to read it, the list would already be empty
+  // — producing a request with no files and a 422. Array.from freezes the selection.
+  const files = Array.from(fileList);
+  if (!files.length) return;
   let sid;
   try { sid = await ensureSession(); } catch (e) { return toast(e.message, true); }
   const form = new FormData();
-  for (const f of fileList) form.append("files", f);
+  for (const f of files) form.append("files", f);
   toast("Indexing upload…");
   try {
     const res = await api(`/api/sessions/${sid}/uploads`, { method: "POST", body: form });
