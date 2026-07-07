@@ -17,8 +17,11 @@ class Settings(BaseSettings):
     # Low temperature keeps answers faithful to the documents (Ollama defaults to 0.8).
     llm_temperature: float = 0.1
 
-    # Local embeddings (sentence-transformers)
+    # Local embeddings (sentence-transformers).
     embed_model: str = "all-MiniLM-L6-v2"
+    # Instruction prefix applied to QUERIES only (bge-style models want one; all-MiniLM
+    # doesn't, so leave it blank).
+    query_prefix: str = ""
 
     # Paths
     documents_dir: Path = BASE_DIR / "documents"
@@ -28,10 +31,15 @@ class Settings(BaseSettings):
     chunk_size: int = 800
     chunk_overlap: int = 120
     top_k: int = 4
-    # Low floor to cut obvious noise (all-MiniLM gives low absolute sims for good matches).
+    # Low floor to cut obvious noise (embedding sims for good matches can still be modest).
     min_score: float = 0.15
     # Also drop passages far below the best hit (relative gate), even if above the floor.
     relevance_margin: float = 0.15
+    # Session uploads are the user's deliberate context for THIS chat, so guarantee they're
+    # consulted: reserve up to this many upload chunks (above a tiny floor) regardless of
+    # how the large vault scores.
+    upload_reserve: int = 2
+    upload_min_score: float = 0.05
 
     # Chat history
     history_turns: int = 6

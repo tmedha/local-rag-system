@@ -15,6 +15,10 @@ SYSTEM_PROMPT = (
     "- Quote exact figures, names, and dates from the context rather than paraphrasing "
     "loosely.\n"
     "- When you state a fact, mention which source file it came from.\n"
+    "- The retrieved context may include unrelated files. Use ONLY the parts that actually "
+    "concern what the user asked about. If the context is about a DIFFERENT person, entity, "
+    "or topic than the question (e.g. the question asks about one person but the text is "
+    "about someone else), do not answer from it.\n"
     "- If the user asks a NEW factual question that the context does not cover, reply "
     'exactly: "I don\'t have that in the documents."\n\n'
     "Conversation rules:\n"
@@ -113,23 +117,33 @@ def retrieve(question: str, session_id: str | None) -> list[dict]:
 
     query_embedding = embed_query(_retrieval_query(question, session_id))
     vault = _gate(_query_collection(get_vault_collection(), query_embedding, None))
+
+    # Session uploads are the user's deliberate context for THIS chat. If the uploaded file
+    # is even faintly relevant (its BEST chunk clears a tiny floor), reserve its top chunks
+    # — including ones below the floor. This matters because a résumé's header may score
+    # 0.16 while its EXPERIENCE bullets score ~0, yet the bullets are exactly what the user
+    # is asking about; we must not drop them just because they embed poorly.
     uploads = []
     if session_id:
-        uploads = _gate(
+        raw = sorted(
             _query_collection(
                 get_uploads_collection(), query_embedding, {"session_id": session_id}
-            )
+            ),
+            key=lambda r: r["distance"],
         )
+        if raw and (1.0 - raw[0]["distance"]) >= settings.upload_min_score:
+            uploads = raw[: settings.upload_reserve]
     if not vault and not uploads:
         return []
 
-    merged = sorted(vault + uploads, key=lambda r: r["distance"])
-    final = merged[: settings.top_k]
-    # Guarantee the best relevant upload is represented, even if vault chunks fill top-k.
-    if uploads and not any(r["metadata"].get("origin") == "upload" for r in final):
-        final = final[: settings.top_k - 1] + [uploads[0]]
-        final.sort(key=lambda r: r["distance"])
-    return final
+    reserved = uploads[: settings.upload_reserve]
+    remaining = max(0, settings.top_k - len(reserved))
+    # vault and uploads come from separate collections, so the sets are disjoint.
+    final = reserved + vault[:remaining]
+    # Order the user's own uploads first in the context (they're the deliberate source for
+    # this chat), then vault; within each group, best match first.
+    final.sort(key=lambda r: (r["metadata"].get("origin") != "upload", r["distance"]))
+    return final[: settings.top_k]
 
 
 def build_messages(

@@ -65,10 +65,29 @@ def _index_file(collection, path: Path, rel: str) -> list[str]:
     return ids
 
 
+def _clear_collection(collection) -> None:
+    """Remove every vector from the vault collection (used on an embedding-model change)."""
+    existing = collection.get(include=[])["ids"]
+    if existing:
+        collection.delete(ids=existing)
+
+
 def reindex() -> dict:
     """Sync the vault collection with the current contents of documents/."""
     collection = get_vault_collection()
     manifest = _load_manifest()
+
+    # Vectors from a different embedding model must never be mixed with the current one.
+    # If the model changed (or this is a fresh manifest), wipe and re-embed everything.
+    if manifest.get("_embed_model") != settings.embed_model:
+        logger.info(
+            "Embedding model is %s; clearing vault index for a full re-embed.",
+            settings.embed_model,
+        )
+        _clear_collection(collection)
+        manifest = {}
+    manifest["_embed_model"] = settings.embed_model
+
     seen: set[str] = set()
     added = updated = removed = 0
 
@@ -100,8 +119,10 @@ def reindex() -> dict:
             "chunk_ids": chunk_ids,
         }
 
-    # Purge files that vanished from the folder.
+    # Purge files that vanished from the folder (skip reserved keys like "_embed_model").
     for rel in list(manifest):
+        if rel.startswith("_"):
+            continue
         if rel not in seen:
             record = manifest.pop(rel)
             if record.get("chunk_ids"):
@@ -119,6 +140,8 @@ def list_documents() -> list[dict]:
     manifest = _load_manifest()
     docs = []
     for rel, rec in sorted(manifest.items()):
+        if rel.startswith("_"):  # reserved metadata key, not a file
+            continue
         docs.append(
             {
                 "name": Path(rel).name,
@@ -131,4 +154,5 @@ def list_documents() -> list[dict]:
 
 
 def stats() -> dict:
-    return {"documents": len(_load_manifest()), "chunks": get_vault_collection().count()}
+    files = [k for k in _load_manifest() if not k.startswith("_")]
+    return {"documents": len(files), "chunks": get_vault_collection().count()}
