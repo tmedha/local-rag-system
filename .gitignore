@@ -1,0 +1,10 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+.env
+storage/
+
+# Vault contents are the user's private data — keep the folder, ignore its files
+documents/*
+!documents/.gitkeep

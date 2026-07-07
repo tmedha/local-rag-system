@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CloakedOracle</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-name">Cloaked<b>Oracle</b></span>
+    </div>
+    <div class="privacy-pill" title="All processing happens on this machine.">
+      <span class="privacy-dot" aria-hidden="true"></span>
+      Local &middot; Offline &middot; No cloud
+    </div>
+    <div class="topbar-actions">
+      <button id="toggle-sessions" class="icon-btn" title="Toggle chat history">
+        <svg viewBox="0 0 20 20" fill="none"><path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        <span>History</span>
+      </button>
+      <button id="toggle-vault" class="icon-btn" title="Open the vault">
+        <svg viewBox="0 0 20 20" fill="none"><rect x="3" y="8" width="14" height="9" rx="1.5" stroke="currentColor" stroke-width="1.6"/><path d="M6 8V6a4 4 0 0 1 8 0v2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        <span>Vault</span>
+      </button>
+      <button id="toggle-evidence" class="icon-btn" title="Toggle evidence">
+        <svg viewBox="0 0 20 20" fill="none"><circle cx="8.5" cy="8.5" r="5.5" stroke="currentColor" stroke-width="1.6"/><path d="M16 16l-3.2-3.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        <span>Evidence</span>
+      </button>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <!-- LEFT: sessions -->
+    <aside id="sessions-zone" class="zone sessions">
+      <div class="zone-head">
+        <span>History</span>
+        <button id="new-chat" class="btn-primary">New chat</button>
+      </div>
+      <ul id="session-list" class="session-list"></ul>
+    </aside>
+
+    <!-- CENTER: chat -->
+    <section class="zone chat">
+      <div id="chat-log" class="chat-log">
+        <div class="empty-state">
+          <p class="empty-title">Ask the oracle about your documents</p>
+          <p class="muted">Answers come only from your vault and this session's uploads.</p>
+        </div>
+      </div>
+      <form id="chat-form" class="chat-form">
+        <textarea id="chat-input" rows="1" placeholder="Ask the oracle…" autocomplete="off"></textarea>
+        <button id="send-btn" type="submit" title="Send">
+          <svg viewBox="0 0 20 20" fill="none"><path d="M4 10h11M10 5l5 5-5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      </form>
+    </section>
+
+    <!-- RIGHT: evidence -->
+    <aside id="evidence-zone" class="zone evidence collapsed">
+      <div class="zone-head">
+        <span>Evidence</span>
+        <button class="close-zone" data-close="evidence" title="Collapse">&times;</button>
+      </div>
+      <div id="evidence-body" class="evidence-body">
+        <p class="muted pad">Relevant passages appear here after you ask a question. Click a source chip on an answer to jump to its passage.</p>
+      </div>
+    </aside>
+  </main>
+
+  <!-- Vault / upload overlay drawer -->
+  <div id="vault-overlay" class="overlay hidden">
+    <div class="drawer">
+      <div class="zone-head">
+        <span>The Vault</span>
+        <button class="close-zone" data-close="vault" title="Close">&times;</button>
+      </div>
+
+      <section class="drawer-section">
+        <div class="section-title">
+          <span>Knowledge base <span class="tag readonly">read-only</span></span>
+          <button id="reindex-btn" class="btn-secondary" title="Re-scan the documents folder">Reload</button>
+        </div>
+        <p class="muted small">Files here are managed in the <code>documents/</code> folder on disk. The app can read them but cannot add or delete them.</p>
+        <ul id="vault-list" class="file-list"></ul>
+      </section>
+
+      <section class="drawer-section">
+        <div class="section-title">
+          <span>Session uploads <span class="tag ephemeral">this session only</span></span>
+        </div>
+        <p class="muted small">Uploaded files are indexed in memory for the current chat and never written to disk. They vanish when the session ends.</p>
+        <label id="dropzone" class="dropzone">
+          <input id="file-input" type="file" multiple accept=".pdf,.txt,.md,.docx" hidden />
+          <span>Drop files here or click to upload</span>
+        </label>
+        <ul id="upload-list" class="file-list"></ul>
+      </section>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
