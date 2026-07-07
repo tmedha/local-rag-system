@@ -112,7 +112,7 @@ async def upload_files(session_id: str, files: list[UploadFile] = File(...)):
         data = await f.read()
         try:
             results.append(uploads.add_upload(session_id, data, f.filename))
-        except ValueError as exc:
+        except Exception as exc:
             results.append({"name": f.filename, "error": str(exc)})
     return {"uploads": results, "files": uploads.list_uploads(session_id)}
 
