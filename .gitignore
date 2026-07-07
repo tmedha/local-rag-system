@@ -4,6 +4,7 @@ __pycache__/
 *.pyc
 .env
 storage/
+.DS_Store
 
 # Vault contents are the user's private data — keep the folder, ignore its files
 documents/*

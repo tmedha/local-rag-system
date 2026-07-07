@@ -171,7 +171,9 @@ def chat_stream(question: str, session_id: str | None = None):
             return
 
         text = "".join(collected)
-        sources = rag.sources_of(passages)
+        # A refusal isn't grounded in anything, so don't attach misleading sources.
+        shown = [] if rag.is_refusal(text) else passages
+        sources = rag.sources_of(shown)
         history.append_message(sid, "user", question)
         history.append_message(sid, "assistant", text, sources)
         history.maybe_set_title(sid, question)
@@ -179,7 +181,7 @@ def chat_stream(question: str, session_id: str | None = None):
             {
                 "type": "done",
                 "sources": sources,
-                "passages": rag.passages_payload(passages),
+                "passages": rag.passages_payload(shown),
             }
         )
 

@@ -19,6 +19,27 @@ network traffic is to `localhost` (Ollama).
 
 Supported formats: **PDF, `.txt`, `.md`, `.docx`**.
 
+## Screenshots
+
+**Chat** — ask questions, get grounded answers with source citations.
+
+![Chat session](screenshots/Chat%20Session.png)
+
+**History** — past chats are tucked into a slide-in drawer so the chat itself is always
+front and center.
+
+![Chat history](screenshots/Chat%20History.png)
+
+**Vault** — a read-only view of everything indexed from `documents/`, plus a dropzone for
+ephemeral, session-only uploads.
+
+![The vault](screenshots/Documents.png)
+
+**Evidence** — the exact passages an answer was grounded in, with sources and similarity
+scores.
+
+![Evidence panel](screenshots/Evidence.png)
+
 ## Installation
 
 You need three things: **Python 3.10+**, **Ollama** (runs the local LLM), and this
@@ -94,7 +115,7 @@ uvicorn app.main:app --reload
 ```
 
 Open **http://localhost:8000**. Add or remove vault files by editing the `documents/`
-folder on disk, then click **Reindex** in the app (or restart the server).
+folder on disk, then click **Reload** in the Vault drawer (or restart the server).
 
 ## Configuration
 
@@ -106,7 +127,7 @@ See `.env.example`. Key settings: `LLM_MODEL`, `EMBED_MODEL`, `CHUNK_SIZE`,
 
 ```
 app/        FastAPI backend (ingest, uploads, retrieval, history, LLM client)
-web/        Single-page UI (Sessions · Chat · Evidence + Vault/upload drawer)
+web/        Single-page UI (Chat + History/Vault/Evidence drawers)
 documents/  The read-only vault (your knowledge base)
 storage/    Chroma vault index + manifest + chat history DB (gitignored)
 ```

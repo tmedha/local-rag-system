@@ -28,8 +28,10 @@ class Settings(BaseSettings):
     chunk_size: int = 800
     chunk_overlap: int = 120
     top_k: int = 4
-    # Minimum cosine similarity a passage must clear to count as relevant evidence.
-    min_score: float = 0.35
+    # Low floor to cut obvious noise (all-MiniLM gives low absolute sims for good matches).
+    min_score: float = 0.15
+    # Also drop passages far below the best hit (relative gate), even if above the floor.
+    relevance_margin: float = 0.15
 
     # Chat history
     history_turns: int = 6

@@ -32,17 +32,8 @@
     </div>
   </header>
 
-  <main class="workspace">
-    <!-- LEFT: sessions -->
-    <aside id="sessions-zone" class="zone sessions">
-      <div class="zone-head">
-        <span>History</span>
-        <button id="new-chat" class="btn-primary">New chat</button>
-      </div>
-      <ul id="session-list" class="session-list"></ul>
-    </aside>
-
-    <!-- CENTER: chat -->
+  <main class="workspace no-evidence">
+    <!-- CENTER: chat (always the permanent, full-width center) -->
     <section class="zone chat">
       <div id="chat-log" class="chat-log">
         <div class="empty-state">
@@ -69,6 +60,20 @@
       </div>
     </aside>
   </main>
+
+  <!-- History overlay drawer (slides in from the left; never affects the chat) -->
+  <div id="history-overlay" class="overlay overlay-left hidden">
+    <div class="drawer drawer-left">
+      <div class="zone-head">
+        <span>History</span>
+        <button class="close-zone" data-close="history" title="Close">&times;</button>
+      </div>
+      <div class="drawer-section">
+        <button id="new-chat" class="btn-primary" style="width:100%">New chat</button>
+      </div>
+      <ul id="session-list" class="session-list"></ul>
+    </div>
+  </div>
 
   <!-- Vault / upload overlay drawer -->
   <div id="vault-overlay" class="overlay hidden">

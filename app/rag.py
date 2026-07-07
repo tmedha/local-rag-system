@@ -24,8 +24,33 @@ SYSTEM_PROMPT = (
     "helpfully. Do not fall back to \"I don't have that in the documents\" for these "
     "conversational turns.\n"
     "- If the user points out you were wrong, re-read the context and correct yourself if "
-    "warranted, citing the exact supporting text."
+    "warranted, citing the exact supporting text.\n"
+    "- If the user sends a short acknowledgment or closing remark (e.g. \"ok\", \"thanks\", "
+    "\"fine\", \"got it\", \"cool\"), reply briefly and politely (e.g. \"Glad that helps!\"). "
+    "Do NOT repeat your previous answer, do NOT mention documents or your knowledge base, "
+    "and do NOT say \"I don't have that in the documents.\""
 )
+
+# Short social turns that should not trigger retrieval or a re-answer.
+_ACKNOWLEDGMENTS = {
+    "ok", "okay", "k", "kk", "thanks", "thank you", "ty", "thx", "fine", "cool",
+    "great", "got it", "nice", "sure", "alright", "all right", "good", "perfect",
+    "awesome", "yep", "yes", "no", "np", "understood",
+}
+
+
+def is_acknowledgment(text: str) -> bool:
+    """True for short social/closing turns that aren't real questions."""
+    cleaned = text.strip().lower().rstrip(".!").strip()
+    return cleaned in _ACKNOWLEDGMENTS
+
+
+REFUSAL = "I don't have that in the documents."
+
+
+def is_refusal(answer: str) -> bool:
+    """True when the model declined for lack of grounding (so we hide sources)."""
+    return answer.strip().lower().startswith("i don't have that in the documents")
 
 
 def _query_collection(collection, query_embedding, where) -> list[dict]:
@@ -60,48 +85,77 @@ def _retrieval_query(question: str, session_id: str | None) -> str:
     return f"{prev}\n{question}" if prev else question
 
 
-def retrieve(question: str, session_id: str | None) -> list[dict]:
-    """Retrieve top-k *relevant* passages across the vault and session uploads.
+def _gate(results: list[dict]) -> list[dict]:
+    """Keep passages that clear the absolute floor AND are within ``relevance_margin``
+    of *this source's* best hit. Gating each source independently is important: a strong
+    vault match must not raise the bar for the session's uploads (or vice-versa)."""
+    if not results:
+        return []
+    best = max(1.0 - r["distance"] for r in results)
+    threshold = max(settings.min_score, best - settings.relevance_margin)
+    kept = [r for r in results if (1.0 - r["distance"]) >= threshold]
+    kept.sort(key=lambda r: r["distance"])
+    return kept
 
-    Chroma always returns its nearest neighbors even when nothing in the store is
-    actually related to the question (e.g. a two-document vault where only one is on
-    topic). We drop anything below ``min_score`` so the evidence panel — and the
-    context handed to the LLM — only ever contains passages that genuinely bear on
-    the question, not just "closest of what's available".
+
+def retrieve(question: str, session_id: str | None) -> list[dict]:
+    """Retrieve top-k relevant passages across the vault and the session's uploads.
+
+    Vault and uploads are gated separately (see ``_gate``) so a large/high-scoring vault
+    can't crowd out a file the user just uploaded for this chat. The best upload hit is
+    always kept if it clears the floor, guaranteeing uploaded files are actually consulted.
+
+    Short acknowledgments ("ok", "thanks") retrieve nothing: they're social turns, not
+    questions, so injecting document context only makes the model ramble.
     """
+    if is_acknowledgment(question):
+        return []
+
     query_embedding = embed_query(_retrieval_query(question, session_id))
-    results = _query_collection(get_vault_collection(), query_embedding, None)
+    vault = _gate(_query_collection(get_vault_collection(), query_embedding, None))
+    uploads = []
     if session_id:
-        results += _query_collection(
-            get_uploads_collection(), query_embedding, {"session_id": session_id}
+        uploads = _gate(
+            _query_collection(
+                get_uploads_collection(), query_embedding, {"session_id": session_id}
+            )
         )
-    results = [r for r in results if (1.0 - r["distance"]) >= settings.min_score]
-    results.sort(key=lambda r: r["distance"])
-    return results[: settings.top_k]
+    if not vault and not uploads:
+        return []
+
+    merged = sorted(vault + uploads, key=lambda r: r["distance"])
+    final = merged[: settings.top_k]
+    # Guarantee the best relevant upload is represented, even if vault chunks fill top-k.
+    if uploads and not any(r["metadata"].get("origin") == "upload" for r in final):
+        final = final[: settings.top_k - 1] + [uploads[0]]
+        final.sort(key=lambda r: r["distance"])
+    return final
 
 
 def build_messages(
     question: str, passages: list[dict], session_id: str | None
 ) -> list[dict]:
-    blocks = []
-    for i, p in enumerate(passages, 1):
-        meta = p["metadata"]
-        label = meta.get("source", "unknown")
-        if meta.get("locator"):
-            label += f" ({meta['locator']})"
-        blocks.append(f"[{i}] {label}:\n{p['text']}")
-    context = "\n\n".join(blocks) if blocks else "(no matching documents)"
-
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     if session_id:
         for m in history.recent_messages(session_id, settings.history_turns):
             messages.append({"role": m["role"], "content": m["content"]})
-    messages.append(
-        {
-            "role": "user",
-            "content": f"Context from the documents:\n\n{context}\n\nQuestion: {question}",
-        }
-    )
+
+    if is_acknowledgment(question):
+        # Social turn: send it plainly so the model gives a brief, natural reply
+        # instead of commenting on a "(no matching documents)" scaffold.
+        user_content = question
+    else:
+        blocks = []
+        for i, p in enumerate(passages, 1):
+            meta = p["metadata"]
+            label = meta.get("source", "unknown")
+            if meta.get("locator"):
+                label += f" ({meta['locator']})"
+            blocks.append(f"[{i}] {label}:\n{p['text']}")
+        context = "\n\n".join(blocks) if blocks else "(no matching documents)"
+        user_content = f"Context from the documents:\n\n{context}\n\nQuestion: {question}"
+
+    messages.append({"role": "user", "content": user_content})
     return messages
 
 
@@ -137,6 +191,9 @@ def answer(question: str, session_id: str) -> dict:
     passages = retrieve(question, session_id)
     messages = build_messages(question, passages, session_id)
     text = llm.chat(messages)
+    # A refusal isn't grounded in anything, so don't attach misleading sources.
+    if is_refusal(text):
+        passages = []
     return {
         "answer": text,
         "sources": sources_of(passages),

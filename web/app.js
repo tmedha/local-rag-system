@@ -3,7 +3,7 @@
 const state = {
   sessionId: null,
   streaming: false,
-  lastPassages: [],
+  lastQuestion: "",
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -17,6 +17,9 @@ const escapeHtml = (s) =>
 
 const TRASH_ICON =
   '<svg viewBox="0 0 20 20" fill="none"><path d="M4 6h12M8 6V4.5A1.5 1.5 0 0 1 9.5 3h1A1.5 1.5 0 0 1 12 4.5V6m-6.5 0 .6 9.4A1.5 1.5 0 0 0 7.6 17h4.8a1.5 1.5 0 0 0 1.5-1.6L14.5 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+const SEARCH_ICON =
+  '<svg viewBox="0 0 20 20" fill="none"><circle cx="8.5" cy="8.5" r="5.5" stroke="currentColor" stroke-width="1.6"/><path d="M16 16l-3.2-3.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
 
 function deleteButton(title, onClick) {
   const btn = el("button", "del icon-del");
@@ -74,7 +77,7 @@ async function loadSessions() {
 async function selectSession(id) {
   const data = await api(`/api/sessions/${id}`);
   state.sessionId = id;
-  state.lastPassages = [];
+  closeHistory();
   renderEvidence([]);
   const log = $("#chat-log");
   log.innerHTML = "";
@@ -94,7 +97,6 @@ async function deleteSession(id) {
 
 function startNewChat(reload = true) {
   state.sessionId = null;
-  state.lastPassages = [];
   $("#chat-log").innerHTML =
     '<div class="empty-state"><p class="empty-title">Ask the oracle about your documents</p>' +
     '<p class="muted">Answers come only from your vault and this session\'s uploads.</p></div>';
@@ -115,17 +117,38 @@ function addMessage(role, content, sources) {
   return msg;
 }
 
+function messageActions(msgEl) {
+  // One row per message holding the "Show evidence" button and source chips.
+  let row = msgEl.querySelector(".msg-actions");
+  if (!row) {
+    row = el("div", "msg-actions");
+    msgEl.append(row);
+  }
+  return row;
+}
+
 function attachSources(msgEl, sources) {
-  const wrap = el("div", "sources");
+  const row = messageActions(msgEl);
   for (const s of sources) {
     const chip = el("span", "chip");
     const dot = el("span", `dot ${s.origin}`);
     chip.append(dot, document.createTextNode(s.name));
     chip.title = `From ${s.origin === "upload" ? "session upload" : "vault"}: ${s.name}`;
-    chip.onclick = () => showEvidenceFor(s.name);
-    wrap.append(chip);
+    chip.onclick = () => showMessageEvidence(msgEl, s.name);
+    row.append(chip);
   }
-  msgEl.append(wrap);
+}
+
+function attachEvidenceButton(msgEl) {
+  // Only live answers carry passages (evidence is in-session only, not persisted).
+  const ev = msgEl._evidence;
+  if (!ev || !ev.passages.length) return;
+  const row = messageActions(msgEl);
+  const btn = el("button", "evidence-btn");
+  btn.innerHTML = SEARCH_ICON + "<span>Show evidence</span>";
+  btn.title = "Show the passages this answer is based on";
+  btn.onclick = () => showMessageEvidence(msgEl, null);
+  row.prepend(btn);
 }
 
 function showError(msgEl, message) {
@@ -182,9 +205,9 @@ async function send() {
       scrollChat();
     } else if (data.type === "done") {
       assistant.textContent = answer;
+      assistant._evidence = { question, passages: data.passages || [] };
       if (data.sources && data.sources.length) attachSources(assistant, data.sources);
-      state.lastPassages = data.passages || [];
-      renderEvidence(state.lastPassages);
+      attachEvidenceButton(assistant);
       loadSessions();
       finish();
     } else if (data.type === "error") {
@@ -220,7 +243,7 @@ function renderEvidence(passages) {
   body.innerHTML = "";
   if (!passages.length) {
     body.innerHTML =
-      '<p class="muted pad">Retrieved passages appear here after you ask a question. Click a source chip on an answer to jump to its passage.</p>';
+      '<p class="muted pad">Click <b>Show evidence</b> under an answer (or one of its source chips) to see the exact passages it was based on.</p>';
     return;
   }
   const question = state.lastQuestion || "";
@@ -241,8 +264,19 @@ function renderEvidence(passages) {
   });
 }
 
-function showEvidenceFor(source) {
+function showMessageEvidence(msgEl, source) {
+  const ev = msgEl._evidence;
+  if (!ev || !ev.passages.length) {
+    toast("Evidence is only kept for the current session, not older chats.");
+    return;
+  }
+  state.lastQuestion = ev.question;
+  renderEvidence(ev.passages);
   openZone("evidence");
+  if (source) highlightPassageSource(source);
+}
+
+function highlightPassageSource(source) {
   const cards = document.querySelectorAll(".passage");
   let target = null;
   cards.forEach((c) => {
@@ -298,8 +332,10 @@ async function uploadFiles(fileList) {
   try {
     const res = await api(`/api/sessions/${sid}/uploads`, { method: "POST", body: form });
     const errors = res.uploads.filter((u) => u.error);
+    const empty = res.uploads.filter((u) => !u.error && u.chunks === 0);
     if (errors.length) toast(errors.map((e) => `${e.name}: ${e.error}`).join("; "), true);
-    else toast("Uploaded (this session only).");
+    else if (empty.length) toast(`No readable text found in ${empty.map((e) => e.name).join(", ")}.`, true);
+    else toast("Uploaded — searchable in this session.");
     await refreshUploads();
   } catch (e) {
     toast(e.message, true);
@@ -337,6 +373,9 @@ function toggleZone(name) {
 function openVault() { $("#vault-overlay").classList.remove("hidden"); loadDocuments(); refreshUploads(); }
 function closeVault() { $("#vault-overlay").classList.add("hidden"); }
 
+function openHistory() { $("#history-overlay").classList.remove("hidden"); loadSessions(); }
+function closeHistory() { $("#history-overlay").classList.add("hidden"); }
+
 function autoGrow() {
   const ta = $("#chat-input");
   ta.style.height = "auto";
@@ -359,23 +398,36 @@ function wire() {
     }
   });
 
-  $("#new-chat").onclick = () => startNewChat();
-  $("#toggle-sessions").onclick = () => toggleZone("sessions");
+  $("#new-chat").onclick = () => { startNewChat(); closeHistory(); };
+  $("#toggle-sessions").onclick = openHistory;
   $("#toggle-evidence").onclick = () => toggleZone("evidence");
   $("#toggle-vault").onclick = openVault;
   $("#reindex-btn").onclick = reloadVault;
   document.querySelectorAll(".close-zone").forEach((b) => {
+    const closers = { vault: closeVault, history: closeHistory };
     const which = b.dataset.close;
-    b.onclick = () => (which === "vault" ? closeVault() : toggleZone(which));
+    b.onclick = closers[which] || (() => toggleZone(which));
   });
   $("#vault-overlay").addEventListener("click", (e) => {
     if (e.target.id === "vault-overlay") closeVault();
+  });
+  $("#history-overlay").addEventListener("click", (e) => {
+    if (e.target.id === "history-overlay") closeHistory();
   });
 
   // uploads
   const input = $("#file-input");
   input.addEventListener("change", () => { uploadFiles(input.files); input.value = ""; });
   const dz = $("#dropzone");
+  // Some browsers (notably Safari) don't reliably delegate a click on a <label> to a
+  // hidden file <input>. Drive it explicitly instead of relying on that implicit link.
+  // Guard against the input's own (programmatically-triggered) click bubbling back up
+  // through the label and re-firing this handler.
+  dz.addEventListener("click", (e) => {
+    if (e.target === input) return;
+    e.preventDefault();
+    input.click();
+  });
   ["dragover", "dragenter"].forEach((ev) =>
     dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.add("drag"); })
   );
